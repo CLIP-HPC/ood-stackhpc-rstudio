@@ -79,9 +79,9 @@ fi
 #######################
 
 RVERSION=$(R --version | head -n 1 | grep -oe "[0-9]\.[0-9]\.[0-9]")
-RVERSION_MAJOR=${RVERSION:0:1}
-RVERSION_MINOR=${RVERSION:2:1}
-RVERSION_POINT=${RVERSION:4:1}
+RVERSION_MAJOR=$(echo "$RVERSION" | cut -d. -f1)
+RVERSION_MINOR=$(echo "$RVERSION" | cut -d. -f2)
+RVERSION_POINT=$(echo "$RVERSION" | cut -d. -f3)
 
 # determine if we need a local database configure for R 4.1 or greater
 if [[ "$RVERSION_MAJOR" -ge 4 && "$RVERSION_MINOR" -ge 1 ]]; then
@@ -118,12 +118,22 @@ echo "rsession-ld-library-path=$LD_LIBRARY_PATH" >> $RSERVER_USER_CONFIG_FILE
 
 # append details of R_LIBS and R_LIBS_SITE to rsession-config-file - https://docs.rstudio.com/ide/server-pro/latest/r-sessions.html#package-installation
 
-# copy the value of R_LIBS
-R_LIBS_PATHS=$R_LIBS
+# always include a user library path scoped to detected platform and R major.minor
+R_PLATFORM=$(R --slave -e 'cat(R.version$platform)')
+EXTRA_R_LIB="$HOME/R/${R_PLATFORM}-library/${RVERSION_MAJOR}.${RVERSION_MINOR}"
+mkdir -p "$EXTRA_R_LIB"
+
+# Ensure the local user library is first so installs default there.
+R_LIBS_PATHS="$EXTRA_R_LIB"
+
+# append the value of R_LIBS
+if [[ -n "$R_LIBS" ]]; then
+  R_LIBS_PATHS="$R_LIBS_PATHS:$R_LIBS"
+fi
 
 # if R_LIBS_SITE has a value, add it to the paths
-if [[ ! -z "R_LIBS_SITE" ]]; then
-    R_LIBS_PATHS=$R_LIBS_PATHS:$R_LIBS_SITE
+if [[ -n "$R_LIBS_SITE" ]]; then
+  R_LIBS_PATHS="$R_LIBS_PATHS:$R_LIBS_SITE"
 fi
 
 # copy R_LIBS_PATHS into the session config file
