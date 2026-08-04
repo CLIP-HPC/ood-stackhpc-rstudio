@@ -1,20 +1,72 @@
 ---
+# This is the generic/shipped form template (cluster left blank on purpose).
+# OnDemand renders local/form.yml.erb instead of this file whenever it
+# exists, since local/ overrides take precedence - local/form.yml.erb is
+# this site's actual config (pinned to the "cbe" cluster). Keep both in
+# sync for changes that aren't cluster-specific.
 cluster: ""
 attributes:
-  bc_queue: ""
-  rstudio_module: ""
-  auto_queues: ""
+  auto_queues:
+    widget: "select"
+    label: "Partition"
+    help: "Slurm partition to submit the job to."
+    options:
+      - ["CPU (c)", "c"]
+      - ["GPU (g)", "g"]
+  rstudio_module:
+    widget: "select"
+    label: "RStudio Server module"
+    help: "RStudio Server build to launch. Each build is matched to a specific R version, which also filters which \"Additional R bundle\" options below are compatible."
+    options:
+<%- require "open3"
+
+    rstudio_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail RStudio-Server 2>&1")
+    rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
+    rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
+
+    bundle_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail R-bundle 2>&1")
+    r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
+
+    # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into a module name
+    toolchain_of = ->(name) { name[/-(?:foss|gfbf)-(\d{4}[ab])/, 1] }
+    rversion_of  = ->(name) { name[/-R-([\d.]+)\z/, 1] }
+
+    compatible = ->(rstudio_name, bundle_name) {
+      tag = toolchain_of.call(rstudio_name)
+      next false if tag.nil? || !bundle_name.include?("-#{tag}")
+      bundle_rver = rversion_of.call(bundle_name)
+      bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
+    }
+-%>
+<%- # values are indices, not raw module names, since form.js reads them back
+    # to filter r_bundle_module's options via its own data-compat-rstudio
+    # attribute (see form.js - OnDemand's own data-option-for-* directives
+    # were tried here first but its internal field/value matching engine did
+    # not reliably apply, so this is a self-contained replacement for it) -%>
+<%- rstudio_server_modules.each_with_index do |rm, ri| -%>
+      - ["<%= rm %>", "<%= ri %>"]
+<%- end -%>
+  r_bundle_module:
+    widget: "select"
+    label: "Additional R bundle"
+    help: "Optional R-bundle-* module (e.g. CRAN/Bioconductor) to load alongside the selected RStudio Server module. Options are filtered by form.js to match its R/toolchain version. Choose None to skip."
+    options:
+      - ["None", ""]
+<%- r_bundle_modules.each_with_index do |bm, bi| -%>
+<%- compat_indices = rstudio_server_modules.each_index.select { |ri| compatible.call(rstudio_server_modules[ri], bm) } -%>
+      - - "<%= bm %>"
+        - "<%= bi %>"
+        - data-compat-rstudio: "<%= compat_indices.join(',') %>"
+<%- end -%>
   extra_modules_script: ""
   cores: ""
   ram: ""
   bc_num_hours: ""
-  bc_email_on_started: ""
 form:
-  - bc_queue
-  - rstudio_module
   - auto_queues
+  - rstudio_module
+  - r_bundle_module
   - extra_modules_script
   - cores
   - ram
   - bc_num_hours
-  - bc_email_on_started

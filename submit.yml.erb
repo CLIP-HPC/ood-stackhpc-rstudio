@@ -5,12 +5,15 @@ batch_connect:
     - csrf_token
 # See the Slurm section at https://osc.github.io/ood-documentation/master/enable-desktops/custom-job-submission.html
 script:
+  job_name: "ood-myrstudio"
   native:
+    - "--partition"
+    - "<%= auto_queues %>"
     - "--ntasks"
     - "1"
     - "--mem"
     - "<%= ram.blank? ? 4 : ram.to_i %>G"
     - "--cpus-per-task"
-    - "<%= cores.blank? ? 1 : cores.to_i %>"<% if auto_queues.start_with?("gpu") %>
+    - "<%= cores.blank? ? 1 : cores.to_i %>"<% if auto_queues == "g" %>
     - "--gpus-per-task"
     - "1"<% end %>

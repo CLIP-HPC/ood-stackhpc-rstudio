@@ -1,6 +1,22 @@
 #!/bin/bash
 <%-
   session_dir = session.staged_root
+
+  # rstudio_module and r_bundle_module hold indices into these same module
+  # lists as rendered by form.yml.erb (not the module names themselves),
+  # because embedding raw module names - which contain "/", "+", "." - as
+  # part of a data-option-for-* HTML attribute name in form.yml.erb was not
+  # safe; resolve them back here
+  require "open3"
+
+  rstudio_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail RStudio-Server 2>&1")
+  rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
+  rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
+  selected_rstudio_module = rstudio_server_modules[context.rstudio_module.to_i]
+
+  bundle_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail R-bundle 2>&1")
+  r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
+  selected_r_bundle_module = context.r_bundle_module.blank? ? nil : r_bundle_modules[context.r_bundle_module.to_i]
 %>
 # A wrapper to start rserver with recommended configuration settings.
 
@@ -16,8 +32,12 @@ export RSERVER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rserver.conf
 export RSESSION_CONFIG_FILE=$RSTUDIO_DATA_DIR/rsession.conf
 export RDATABASE_CONFIG_FILE=$RSTUDIO_DATA_DIR/db.conf
 export RSTUDIO_LOGS_DIR=$RSTUDIO_DATA_DIR/logs
-# NB The form.yml.erb must supply either the auto_modules_RStudio_Server attribute or the rstudio_module attribue
-export RSTUDIO_MODULE=<%= context["auto_modules_RStudio-Server"] || context.rstudio_module %>
+# rserver is RPATH-linked against the R build it depends on, so the R version
+# is selected by picking an RStudio-Server module (see form.yml.erb), not by
+# loading a separate R module afterwards - that only changes which R is on
+# PATH, not the R engine rsession embeds, and crashes with "undefined symbol"
+# errors on ABI mismatch
+export RSTUDIO_MODULE="<%= selected_rstudio_module %>"
 export RSERVER_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rserver.conf
 export RSESSION_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rsession.conf
 export RDATABASE_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/db.conf
@@ -29,6 +49,9 @@ echo "Preparing rstudio configuration..."
 
 module purge
 module load $RSTUDIO_MODULE
+<% if selected_r_bundle_module %>
+module load <%= selected_r_bundle_module %>
+<% end %>
 
 ################################################################
 # load the module helper script (if the user has supplied one) #
