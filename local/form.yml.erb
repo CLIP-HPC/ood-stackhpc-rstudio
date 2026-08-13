@@ -6,21 +6,37 @@
 # aren't cluster-specific.
 cluster: "cbe"
 <%-
-  require "open3"
+  require "json"
 
-  # discover_modules never raises: a failure here (missing timeout/bash
-  # binary, module command erroring, etc.) must not break the rest of this
-  # form - it degrades to the hardcoded fallback below and reports what
-  # went wrong via the *_debug variables surfaced in the help text below,
-  # since this can't be observed/tested from a dev shell that may differ
-  # from wherever OnDemand actually renders this file
-  discover_modules = ->(query) {
+  # Module availability is read from this site's periodically-refreshed
+  # module snapshot rather than shelling out to `module avail` live: this
+  # app's own process runs in a mount namespace where CVMFS's nested
+  # software catalogs aren't visible (confirmed via /proc/<pid>/root - only
+  # the top-level /cvmfs mount is there), so `module` never gets defined no
+  # matter how the shell-out is invoked. This cache is a plain local file,
+  # so it sidesteps that namespace issue entirely, at the cost of only
+  # being as fresh as the cache's last refresh.
+  modules_cache_path = "/etc/ood/modules/cbe.json"
+
+  # load_modules_cache never raises: a failure here (missing/unreadable
+  # file, malformed JSON, etc.) must not break the rest of this form - it
+  # degrades to the hardcoded fallback below and reports what went wrong
+  # via the *_debug variables surfaced in the help text below, since this
+  # can't be observed/tested from a dev shell that may differ from
+  # wherever OnDemand actually renders this file
+  load_modules_cache = ->() {
     begin
-      out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail #{query} 2>&1")
-      [out, nil]
+      [JSON.parse(File.read(modules_cache_path)), nil]
     rescue => e
-      ["", "#{e.class}: #{e.message}"]
+      [{}, "#{e.class}: #{e.message}"]
     end
+  }
+
+  # collect every "fullName" (e.g. "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2")
+  # filed under top-level module base-name key(s) matching name_or_prefix
+  full_names_under = ->(cache, name_or_prefix, prefix:) {
+    keys = prefix ? cache.keys.select { |k| k.start_with?(name_or_prefix) } : [name_or_prefix]
+    keys.flat_map { |k| (cache[k] || {}).values.map { |meta| meta["fullName"] } }.compact.uniq.sort
   }
 
   # escape a string for safe embedding inside a double-quoted YAML scalar
@@ -33,15 +49,15 @@ cluster: "cbe"
       .gsub("\n") { "\\n" }
   }
 
-  rstudio_out, rstudio_err = discover_modules.call("RStudio-Server")
-  rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
-  rstudio_debug = rstudio_err || (rstudio_server_modules.empty? ? "no matches in raw output #{rstudio_out.strip.inspect}" : nil)
+  modules_cache, cache_err = load_modules_cache.call
+
+  rstudio_server_modules = cache_err ? [] : full_names_under.call(modules_cache, "RStudio-Server", prefix: false)
+  rstudio_debug = cache_err || (rstudio_server_modules.empty? ? "no RStudio-Server entries in #{modules_cache_path}" : nil)
   rstudio_debug = yaml_escape.call(rstudio_debug)[0, 300] if rstudio_debug
   rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
 
-  bundle_out, bundle_err = discover_modules.call("R-bundle")
-  r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
-  bundle_debug = bundle_err || (r_bundle_modules.empty? ? "no matches in raw output #{bundle_out.strip.inspect}" : nil)
+  r_bundle_modules = cache_err ? [] : full_names_under.call(modules_cache, "R-bundle-", prefix: true)
+  bundle_debug = cache_err || (r_bundle_modules.empty? ? "no R-bundle-* entries in #{modules_cache_path}" : nil)
   bundle_debug = yaml_escape.call(bundle_debug)[0, 300] if bundle_debug
 
   # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into a module name
