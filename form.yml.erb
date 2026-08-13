@@ -5,6 +5,56 @@
 # this site's actual config (pinned to the "cbe" cluster). Keep both in
 # sync for changes that aren't cluster-specific.
 cluster: ""
+<%-
+  require "open3"
+
+  # discover_modules never raises: a failure here (missing timeout/bash
+  # binary, module command erroring, etc.) must not break the rest of this
+  # form - it degrades to the hardcoded fallback below and reports what
+  # went wrong via the *_debug variables surfaced in the help text below,
+  # since this can't be observed/tested from a dev shell that may differ
+  # from wherever OnDemand actually renders this file
+  discover_modules = ->(query) {
+    begin
+      out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail #{query} 2>&1")
+      [out, nil]
+    rescue => e
+      ["", "#{e.class}: #{e.message}"]
+    end
+  }
+
+  # escape a string for safe embedding inside a double-quoted YAML scalar
+  # (block form avoids gsub's own backslash-replacement reinterpretation)
+  yaml_escape = ->(s) {
+    s.to_s
+      .gsub("\\") { "\\\\" }
+      .gsub('"') { "\\\"" }
+      .gsub("\r") { "" }
+      .gsub("\n") { "\\n" }
+  }
+
+  rstudio_out, rstudio_err = discover_modules.call("RStudio-Server")
+  rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
+  rstudio_debug = rstudio_err || (rstudio_server_modules.empty? ? "no matches in raw output #{rstudio_out.strip.inspect}" : nil)
+  rstudio_debug = yaml_escape.call(rstudio_debug)[0, 300] if rstudio_debug
+  rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
+
+  bundle_out, bundle_err = discover_modules.call("R-bundle")
+  r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
+  bundle_debug = bundle_err || (r_bundle_modules.empty? ? "no matches in raw output #{bundle_out.strip.inspect}" : nil)
+  bundle_debug = yaml_escape.call(bundle_debug)[0, 300] if bundle_debug
+
+  # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into a module name
+  toolchain_of = ->(name) { name[/-(?:foss|gfbf)-(\d{4}[ab])/, 1] }
+  rversion_of  = ->(name) { name[/-R-([\d.]+)\z/, 1] }
+
+  compatible = ->(rstudio_name, bundle_name) {
+    tag = toolchain_of.call(rstudio_name)
+    next false if tag.nil? || !bundle_name.include?("-#{tag}")
+    bundle_rver = rversion_of.call(bundle_name)
+    bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
+  }
+-%>
 attributes:
   auto_queues:
     widget: "select"
@@ -16,28 +66,8 @@ attributes:
   rstudio_module:
     widget: "select"
     label: "RStudio Server module"
-    help: "RStudio Server build to launch. Each build is matched to a specific R version, which also filters which \"Additional R bundle\" options below are compatible."
+    help: "RStudio Server build to launch. Each build is matched to a specific R version, which also filters which \"Additional R bundle\" options below are compatible.<%= rstudio_debug ? " [module discovery: #{rstudio_debug}]" : '' %>"
     options:
-<%- require "open3"
-
-    rstudio_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail RStudio-Server 2>&1")
-    rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
-    rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
-
-    bundle_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail R-bundle 2>&1")
-    r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
-
-    # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into a module name
-    toolchain_of = ->(name) { name[/-(?:foss|gfbf)-(\d{4}[ab])/, 1] }
-    rversion_of  = ->(name) { name[/-R-([\d.]+)\z/, 1] }
-
-    compatible = ->(rstudio_name, bundle_name) {
-      tag = toolchain_of.call(rstudio_name)
-      next false if tag.nil? || !bundle_name.include?("-#{tag}")
-      bundle_rver = rversion_of.call(bundle_name)
-      bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
-    }
--%>
 <%- # values are indices, not raw module names, since form.js reads them back
     # to filter r_bundle_module's options via its own data-compat-rstudio
     # attribute (see form.js - OnDemand's own data-option-for-* directives
@@ -49,7 +79,7 @@ attributes:
   r_bundle_module:
     widget: "select"
     label: "Additional R bundle"
-    help: "Optional R-bundle-* module (e.g. CRAN/Bioconductor) to load alongside the selected RStudio Server module. Options are filtered by form.js to match its R/toolchain version. Choose None to skip."
+    help: "Optional R-bundle-* module (e.g. CRAN/Bioconductor) to load alongside the selected RStudio Server module. Options are filtered by form.js to match its R/toolchain version. Choose None to skip.<%= bundle_debug ? " [module discovery: #{bundle_debug}]" : '' %>"
     options:
       - ["None", ""]
 <%- r_bundle_modules.each_with_index do |bm, bi| -%>
