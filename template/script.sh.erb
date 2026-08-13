@@ -9,16 +9,43 @@
   # safe; resolve them back here
   require "open3"
 
-  rstudio_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail RStudio-Server 2>&1")
+  # module discovery must not raise here: an unhandled exception at this
+  # point breaks job launch itself, which is harder to diagnose than a
+  # broken form render (no portal log access), so mirror the same
+  # rescue+fallback used in form.yml.erb
+  discover_modules = ->(query) {
+    begin
+      out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail #{query} 2>&1")
+      [out, nil]
+    rescue => e
+      ["", "#{e.class}: #{e.message}"]
+    end
+  }
+
+  # quote a string as a single safe bash argument, so discovery error text
+  # (arbitrary subprocess output) can't be interpreted as shell syntax when
+  # echoed into this generated script
+  sh_quote = ->(s) { "'" + s.to_s.gsub("'") { "'\\''" } + "'" }
+
+  rstudio_out, rstudio_err = discover_modules.call("RStudio-Server")
   rstudio_server_modules = rstudio_out.lines.map(&:chomp).select { |l| l =~ /\ARStudio-Server\/\S+\z/ }.uniq.sort
   rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
-  selected_rstudio_module = rstudio_server_modules[context.rstudio_module.to_i]
+  selected_rstudio_module = rstudio_server_modules[context.rstudio_module.to_i] || rstudio_server_modules.first
 
-  bundle_out, _status = Open3.capture2e("timeout", "10", "bash", "-lc", "module -t avail R-bundle 2>&1")
+  bundle_out, bundle_err = discover_modules.call("R-bundle")
   r_bundle_modules = bundle_out.lines.map(&:chomp).select { |l| l =~ /\AR-bundle-\S+\z/ }.uniq.sort
   selected_r_bundle_module = context.r_bundle_module.blank? ? nil : r_bundle_modules[context.r_bundle_module.to_i]
 %>
 # A wrapper to start rserver with recommended configuration settings.
+<% if rstudio_err -%>
+echo <%= sh_quote.call("WARNING: RStudio-Server module discovery failed (#{rstudio_err}); falling back to #{selected_rstudio_module}") %> >&2
+<% end -%>
+<% if bundle_err -%>
+echo <%= sh_quote.call("WARNING: R-bundle module discovery failed (#{bundle_err}); no bundle will be loaded") %> >&2
+<% end -%>
+<% if !context.r_bundle_module.blank? && selected_r_bundle_module.nil? -%>
+echo <%= sh_quote.call("WARNING: selected R-bundle module index #{context.r_bundle_module} is no longer valid; no bundle will be loaded") %> >&2
+<% end -%>
 
 #############
 # constants #
