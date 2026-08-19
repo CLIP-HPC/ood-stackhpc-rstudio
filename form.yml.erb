@@ -105,9 +105,40 @@ attributes:
         - data-compat-rstudio: "<%= compat_indices.join(',') %>"
 <%- end -%>
   extra_modules_script: ""
-  cores: ""
-  ram: ""
-  bc_num_hours: ""
+  cores:
+    widget: "select"
+    label: "CPU cores"
+    help: "Number of CPU cores to request (--cpus-per-task)."
+    options:
+      - ["1", "1"]
+      - ["2", "2"]
+      - ["4", "4"]
+      - ["8", "8"]
+      - ["16", "16"]
+      - ["32", "32"]
+  ram:
+    widget: "select"
+    label: "Memory (GB)"
+    help: "Amount of memory to request, in GB."
+    options:
+      - ["4 GB", "4"]
+      - ["8 GB", "8"]
+      - ["16 GB", "16"]
+      - ["32 GB", "32"]
+      - ["64 GB", "64"]
+      - ["128 GB", "128"]
+  bc_num_hours:
+    widget: "select"
+    label: "Wall time (hours)"
+    help: "Maximum session duration, in hours."
+    options:
+      - ["1", "1"]
+      - ["2", "2"]
+      - ["4", "4"]
+      - ["8", "8"]
+      - ["12", "12"]
+      - ["24", "24"]
+      - ["48", "48"]
 form:
   - auto_queues
   - rstudio_module
