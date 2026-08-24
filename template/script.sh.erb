@@ -53,7 +53,7 @@ find /tmp -maxdepth 1 -type l -name "ondemand-rstudio-tmp*" -user $(whoami) -mti
 ###############################
 # create a secure-cookie-file #
 ###############################
-cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1 > $COOKIE_FILE
+openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | cut -c1-32 > $COOKIE_FILE
 
 ###################################
 # Maybe set server data directory #
