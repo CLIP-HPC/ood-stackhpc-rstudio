@@ -15,5 +15,5 @@ script:
     - "<%= ram.blank? ? 4 : ram.to_i %>G"
     - "--cpus-per-task"
     - "<%= cores.blank? ? 1 : cores.to_i %>"<% if auto_queues == "g" %>
-    - "--gpus-per-task"
-    - "1"<% end %>
+    - "--gres"
+    - "<%= gres %>:<%= gres_count.blank? ? 1 : gres_count.to_i %>"<% end %>

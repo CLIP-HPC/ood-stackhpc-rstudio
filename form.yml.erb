@@ -1,7 +1,7 @@
 ---
 cluster: ""
 # Limits follow the interactive QOS (48 CPUs, 1000 GB, 12 hours per user) and the
-# submit rules on CBE.next: sessions on m need at least 128 GB, sessions on g get one GPU.
+# submit rules on CBE.next: sessions on m need at least 128 GB, sessions on g need a GPU.
 attributes:
   rstudio_module:
     value: "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"
@@ -9,13 +9,27 @@ attributes:
     widget: "select"
     label: "Partition"
     help: |
-      Slurm partition to submit the job to. Sessions on GPU (g) get one GPU.
-      Sessions on high memory (m) need at least 128 GB memory.
+      Slurm partition to submit the job to. Sessions on GPU (g) choose a GPU
+      resource below. Sessions on high memory (m) need at least 128 GB memory.
     options:
-      - ["CPU (c)", "c", data-min-ram: 1, data-set-ram: 32]
+      - ["CPU (c)", "c", data-min-ram: 1, data-set-ram: 32, data-hide-gres: true, data-hide-gres-count: true]
       - ["GPU (g)", "g", data-min-ram: 1, data-set-ram: 32]
-      - ["High memory (m)", "m", data-min-ram: 128, data-set-ram: 128]
+      - ["High memory (m)", "m", data-min-ram: 128, data-set-ram: 128, data-hide-gres: true, data-hide-gres-count: true]
   extra_modules_script: ""
+  gres:
+    widget: "select"
+    label: "Resources"
+    help: "Select GPU or other Slurm GRES resources (partition g only)"
+    options:
+      - ["NVIDIA B200 MIG slice (23 GB)", "gpu:nvidia_b200_1g.23gb"]
+      - ["NVIDIA B200 GPU (full)", "gpu:nvidia_b200"]
+  gres_count:
+    widget: "number_field"
+    label: "Resource count"
+    help: "Count of GPU or other Slurm GRES resources"
+    value: 1
+    min: 1
+    step: 1
   cores:
     widget: "number_field"
     label: "CPU cores"
@@ -42,6 +56,8 @@ form:
   - rstudio_module
   - auto_queues
   - extra_modules_script
+  - gres
+  - gres_count
   - cores
   - ram
   - bc_num_hours
