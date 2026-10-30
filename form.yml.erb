@@ -1,19 +1,42 @@
 ---
 cluster: ""
+# Limits follow the interactive QOS (48 CPUs, 1000 GB, 12 hours per user) and the
+# submit rules on CBE.next: sessions on m need at least 64 GB, sessions on g get one GPU.
 attributes:
   rstudio_module:
     value: "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"
   auto_queues:
     widget: "select"
     label: "Partition"
-    help: "Slurm partition to submit the job to."
+    help: |
+      Slurm partition to submit the job to. Sessions on GPU (g) get one GPU.
+      Use high memory (m) only for more memory than a CPU node has; it needs at least 64 GB.
     options:
-      - ["CPU (c)", "c"]
-      - ["GPU (g)", "g"]
+      - ["CPU (c)", "c", data-min-ram: 1, data-set-ram: 32]
+      - ["GPU (g)", "g", data-min-ram: 1, data-set-ram: 32]
+      - ["High memory (m)", "m", data-min-ram: 64, data-set-ram: 64]
   extra_modules_script: ""
-  cores: ""
-  ram: ""
-  bc_num_hours: ""
+  cores:
+    widget: "number_field"
+    label: "CPU cores"
+    value: 2
+    min: 1
+    max: 48
+    step: 1
+  ram:
+    widget: "number_field"
+    label: "Memory (GB)"
+    value: 32
+    min: 1
+    max: 1000
+    step: 1
+  bc_num_hours:
+    widget: "number_field"
+    label: "Hours"
+    value: 8
+    min: 1
+    max: 12
+    step: 1
   bc_email_on_started: ""
 form:
   - rstudio_module
