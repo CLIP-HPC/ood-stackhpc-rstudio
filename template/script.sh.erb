@@ -184,12 +184,7 @@ find /tmp -maxdepth 1 -type l -name "ondemand-rstudio-tmp*" -user $(whoami) -mti
 ###############################
 # create a secure-cookie-file #
 ###############################
-# read a bounded amount of random data: the original endless
-# `cat /dev/urandom | ... | head -n 1` hangs forever when the job inherits an
-# ignored SIGPIPE (seen on cbe-m3-1), since nothing upstream of head then exits
-# (1024 random bytes leave ~250 alphanumeric characters, far more than 32)
-head -c 1024 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32 > $COOKIE_FILE
-echo >> $COOKIE_FILE
+openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | cut -c1-32 > $COOKIE_FILE
 
 ###################################
 # Maybe set server data directory #

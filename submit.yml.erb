@@ -9,16 +9,23 @@ batch_connect:
   # only accept plain GRES-name characters so a tampered value can't smuggle
   # extra syntax into the --gpus-per-task argument
   gpu_spec = (gpu_type.to_s =~ /\A[A-Za-z0-9_.\-]+\z/) ? "#{gpu_type}:1" : "1"
+
+  # form.js only offers memory sizes valid for the chosen partition; enforce
+  # the same CBE.next rules here for stale/cached or hand-edited values:
+  # sessions on m need at least 128 GB, the interactive QOS allows 1000 GB
+  mem_gb = ram.blank? ? 4 : ram.to_i
+  mem_gb = [mem_gb, 128].max if partition == "m"
+  mem_gb = [[mem_gb, 1].max, 1000].min
 -%>
 script:
-  job_name: "ood-myrstudio"
+  job_name: "ood-rstudio"
   native:
     - "--partition"
     - "<%= partition %>"
     - "--ntasks"
     - "1"
     - "--mem"
-    - "<%= ram.blank? ? 4 : ram.to_i %>G"
+    - "<%= mem_gb %>G"
     - "--cpus-per-task"
     - "<%= cores.blank? ? 1 : cores.to_i %>"<% if partition == "g" %>
     - "--gpus-per-task"

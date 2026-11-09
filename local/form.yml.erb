@@ -71,11 +71,13 @@ cluster: "cbe"
     bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
   }
 -%>
+# Limits follow the interactive QOS (48 CPUs, 1000 GB, 12 hours per user) and the
+# submit rules on CBE.next: sessions on m need at least 128 GB, sessions on g get one GPU.
 attributes:
   partition:
     widget: "select"
     label: "Partition"
-    help: "Slurm partition to submit the job to."
+    help: "Slurm partition to submit the job to. Sessions on GPU (g) get one GPU of the type chosen below. Sessions on high memory (m) need at least 128 GB memory."
     options:
       - ["CPU (c)", "c"]
       - ["GPU (g)", "g"]
@@ -134,23 +136,24 @@ attributes:
   ram:
     widget: "select"
     label: "Memory (GB)"
-    help: "Amount of memory to request, in GB. Sizes above 128 GB are only offered on the High memory (m) partition."
+    help: "Amount of memory to request, in GB. The high memory (m) partition offers 128 GB to 1000 GB; the other partitions up to 128 GB."
     options:
-      - ["4 GB", "4"]
-      - ["8 GB", "8"]
-      - ["16 GB", "16"]
-      - ["32 GB", "32"]
-      - ["64 GB", "64"]
+<%- # data-only-partition lists the partitions an option is offered on (form.js
+    # hides it elsewhere): m sessions need at least 128 GB, and the
+    # interactive QOS caps memory at 1000 GB -%>
+      - ["4 GB", "4", data-only-partition: "c,g"]
+      - ["8 GB", "8", data-only-partition: "c,g"]
+      - ["16 GB", "16", data-only-partition: "c,g"]
+      - ["32 GB", "32", data-only-partition: "c,g"]
+      - ["64 GB", "64", data-only-partition: "c,g"]
       - ["128 GB", "128"]
-<%- # sizes only the high-memory (m) nodes can satisfy; form.js hides them
-    # unless the m partition is selected -%>
       - ["256 GB", "256", data-only-partition: "m"]
       - ["512 GB", "512", data-only-partition: "m"]
-      - ["1024 GB", "1024", data-only-partition: "m"]
+      - ["1000 GB", "1000", data-only-partition: "m"]
   bc_num_hours:
     widget: "select"
     label: "Wall time (hours)"
-    help: "Maximum session duration, in hours."
+    help: "Maximum session duration, in hours (the interactive QOS allows at most 12)."
     value: "1"
     options:
       - ["1", "1"]
@@ -158,8 +161,7 @@ attributes:
       - ["4", "4"]
       - ["8", "8"]
       - ["12", "12"]
-      - ["24", "24"]
-      - ["48", "48"]
+  bc_email_on_started: ""
 form:
   - rstudio_module
   - r_bundle_module
@@ -169,3 +171,4 @@ form:
   - cores
   - ram
   - bc_num_hours
+  - bc_email_on_started

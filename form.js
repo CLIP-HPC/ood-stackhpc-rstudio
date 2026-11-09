@@ -32,9 +32,10 @@ $(function () {
   applyRBundleFilter();
 });
 
-// form.yml.erb tags memory <option>s that only some partitions can satisfy
-// with data-only-partition="m"; hide them for any other partition, and if
-// the current choice gets hidden, fall back to the largest size still shown
+// form.yml.erb tags memory <option>s that only some partitions allow with
+// data-only-partition="c,g" (a comma-separated partition list); hide them for
+// any other partition, and if the current choice gets hidden, move to the
+// smallest size still shown that is at least as large (else the largest one)
 function applyRamFilter() {
   var partition = $('select[name$="[partition]"]').val();
   var $ram = $('select[name$="[ram]"]');
@@ -49,7 +50,11 @@ function applyRamFilter() {
   });
 
   if ($ram.find('option:selected').prop('disabled')) {
-    $ram.val($ram.find('option:not(:disabled)').last().val()).trigger('change');
+    var current = Number($ram.val());
+    var $allowed = $ram.find('option:not(:disabled)');
+    var $larger = $allowed.filter(function () { return Number(this.value) >= current; });
+    var $next = $larger.length ? $larger.first() : $allowed.last();
+    $ram.val($next.val()).trigger('change');
   }
 }
 
