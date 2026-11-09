@@ -1,7 +1,7 @@
 // form.yml.erb tags each "Additional R bundle" <option> (except "None") with
-// a custom data-compat-rstudio="0,1" attribute: a comma-separated list of the
-// rstudio_module <option> index values it is compiled against (matching R
-// version + toolchain). This is hand-rolled rather than relying on
+// a custom data-compat-rstudio="A,B" attribute: a comma-separated list of the
+// rstudio_module <option> values (module names) it is compiled against
+// (matching R version + toolchain). This is hand-rolled rather than relying on
 // OnDemand's built-in data-option-for-* directives, since several attempts
 // using that mechanism did not reliably filter options in practice.
 
@@ -31,3 +31,40 @@ $(document).on('change', 'select[name$="[rstudio_module]"]', function () {
 $(function () {
   applyRBundleFilter();
 });
+
+// form.yml.erb tags memory <option>s that only some partitions can satisfy
+// with data-only-partition="m"; hide them for any other partition, and if
+// the current choice gets hidden, fall back to the largest size still shown
+function applyRamFilter() {
+  var partition = $('select[name$="[partition]"]').val();
+  var $ram = $('select[name$="[ram]"]');
+
+  $ram.find('option').each(function () {
+    var only = $(this).data('onlyPartition');
+    if (only === undefined) return; // available on every partition
+
+    var ok = String(only).split(',').indexOf(partition) !== -1;
+    $(this).prop('hidden', !ok);
+    $(this).prop('disabled', !ok);
+  });
+
+  if ($ram.find('option:selected').prop('disabled')) {
+    $ram.val($ram.find('option:not(:disabled)').last().val()).trigger('change');
+  }
+}
+
+$(document).on('change', 'select[name$="[partition]"]', applyRamFilter);
+$(applyRamFilter);
+
+// the GPU type field only applies to the g partition; hide it otherwise
+// (submit.yml.erb ignores its value for other partitions). OnDemand 4 wraps
+// each field in "#<field id>_wrapper" and hides with Bootstrap's d-none, the
+// same way its own dynamic_forms.js toggleItemVisible() does
+function applyGpuTypeVisibility() {
+  var isGpu = $('select[name$="[partition]"]').val() === 'g';
+  var $gpuType = $('select[name$="[gpu_type]"]');
+  $('#' + $gpuType.attr('id') + '_wrapper').toggleClass('d-none', !isGpu);
+}
+
+$(document).on('change', 'select[name$="[partition]"]', applyGpuTypeVisibility);
+$(applyGpuTypeVisibility);

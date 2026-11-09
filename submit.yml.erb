@@ -4,16 +4,22 @@ batch_connect:
   conn_params:
     - csrf_token
 # See the Slurm section at https://osc.github.io/ood-documentation/master/enable-desktops/custom-job-submission.html
+<%-
+  # gpu_type comes from the form (a Slurm GRES type name, or "" for any GPU);
+  # only accept plain GRES-name characters so a tampered value can't smuggle
+  # extra syntax into the --gpus-per-task argument
+  gpu_spec = (gpu_type.to_s =~ /\A[A-Za-z0-9_.\-]+\z/) ? "#{gpu_type}:1" : "1"
+-%>
 script:
   job_name: "ood-myrstudio"
   native:
     - "--partition"
-    - "<%= auto_queues %>"
+    - "<%= partition %>"
     - "--ntasks"
     - "1"
     - "--mem"
     - "<%= ram.blank? ? 4 : ram.to_i %>G"
     - "--cpus-per-task"
-    - "<%= cores.blank? ? 1 : cores.to_i %>"<% if auto_queues == "g" %>
+    - "<%= cores.blank? ? 1 : cores.to_i %>"<% if partition == "g" %>
     - "--gpus-per-task"
-    - "1"<% end %>
+    - "<%= gpu_spec %>"<% end %>
