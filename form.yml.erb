@@ -72,12 +72,13 @@ cluster: ""
   }
 -%>
 # Limits follow the interactive QOS (48 CPUs, 1000 GB, 12 hours per user) and the
-# submit rules on CBE.next: sessions on m need at least 128 GB, sessions on g get one GPU.
+# submit rules on CBE.next: sessions on m need at least 200 GB (204800 MB, enforced by
+# the cluster's submit filter), sessions on g get one GPU.
 attributes:
   partition:
     widget: "select"
     label: "Partition"
-    help: "Slurm partition to submit the job to. Sessions on GPU (g) get one GPU of the type chosen below. Sessions on high memory (m) need at least 128 GB memory."
+    help: "Slurm partition to submit the job to. Sessions on GPU (g) get one GPU of the type chosen below. Sessions on high memory (m) need at least 200 GB memory."
     options:
       - ["CPU (c)", "c"]
       - ["GPU (g)", "g"]
@@ -136,17 +137,18 @@ attributes:
   ram:
     widget: "select"
     label: "Memory (GB)"
-    help: "Amount of memory to request, in GB. The high memory (m) partition offers 128 GB to 1000 GB; the other partitions up to 128 GB."
+    help: "Amount of memory to request, in GB. The high memory (m) partition offers 200 GB to 1000 GB; the other partitions up to 128 GB."
     options:
 <%- # data-only-partition lists the partitions an option is offered on (form.js
-    # hides it elsewhere): m sessions need at least 128 GB, and the
+    # hides it elsewhere): m sessions need at least 200 GB, and the
     # interactive QOS caps memory at 1000 GB -%>
       - ["4 GB", "4", data-only-partition: "c,g"]
       - ["8 GB", "8", data-only-partition: "c,g"]
       - ["16 GB", "16", data-only-partition: "c,g"]
       - ["32 GB", "32", data-only-partition: "c,g"]
       - ["64 GB", "64", data-only-partition: "c,g"]
-      - ["128 GB", "128"]
+      - ["128 GB", "128", data-only-partition: "c,g"]
+      - ["200 GB", "200", data-only-partition: "m"]
       - ["256 GB", "256", data-only-partition: "m"]
       - ["512 GB", "512", data-only-partition: "m"]
       - ["1000 GB", "1000", data-only-partition: "m"]

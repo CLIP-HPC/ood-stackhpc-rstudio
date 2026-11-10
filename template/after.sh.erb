@@ -1,8 +1,6 @@
 # Wait for the RStudio Server to start
-# 600s rather than 120s: on a node whose CVMFS cache is cold, fetching the
-# RStudio/R/R-bundle module tree on first load alone can take minutes
 echo "Waiting for RStudio Server to open port ${port}..."
-if wait_until_port_used "${host}:${port}" 600; then
+if wait_until_port_used "${host}:${port}" 120; then
   echo "Discovered RStudio Server listening on port ${port}!"
 else
   echo "Timed out waiting for RStudio Server to open port ${port}! on $(date)"

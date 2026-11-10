@@ -12,9 +12,10 @@ batch_connect:
 
   # form.js only offers memory sizes valid for the chosen partition; enforce
   # the same CBE.next rules here for stale/cached or hand-edited values:
-  # sessions on m need at least 128 GB, the interactive QOS allows 1000 GB
+  # sessions on m need at least 200 GB (the submit filter requires 204800 MB),
+  # the interactive QOS allows 1000 GB
   mem_gb = ram.blank? ? 4 : ram.to_i
-  mem_gb = [mem_gb, 128].max if partition == "m"
+  mem_gb = [mem_gb, 200].max if partition == "m"
   mem_gb = [[mem_gb, 1].max, 1000].min
 -%>
 script:

@@ -162,14 +162,6 @@ if [[ -f <%= context.extra_modules_script %> ]]; then
 fi
 <% end %>
 
-# TEMPORARY DEBUG: timestamped trace of every remaining setup step, written
-# to trace.log in the session directory, to find where startup stalls on some
-# nodes (started only after module loading, so Lmod's own output is excluded)
-exec 5>"$WORKING_DIR/trace.log"
-BASH_XTRACEFD=5
-PS4='+[$(date +%T.%N)] '
-set -x
-
 ##############################
 # Configure RSTUDIO_DATA_DIR #
 ##############################
@@ -273,7 +265,6 @@ echo "r-libs-user=$R_LIBS_PATHS" >> $RSESSION_USER_CONFIG_FILE
 #################
 # start rserver #
 #################
-set +x  # TEMPORARY DEBUG: end of trace
 echo "[$(date +%T)] starting rserver on port $port..."
 
 # pass execution to rserver
