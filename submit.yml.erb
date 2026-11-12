@@ -17,6 +17,16 @@ batch_connect:
   mem_gb = ram.blank? ? 4 : ram.to_i
   mem_gb = [mem_gb, 200].max if partition == "m"
   mem_gb = [[mem_gb, 1].max, 1000].min
+
+  # Slurm holds a session longer than the interactive QOS allows with an unhelpful
+  # pending reason, so check the same limit here; the dashboard shows the error text
+  load File.join(File.dirname(__FILE__), "qos_limits.rb")
+  max_hours = RStudioQos.limits[:hours]
+  hours = bc_num_hours.blank? ? 1 : bc_num_hours.to_i
+  if hours > max_hours
+    raise ArgumentError, "OnDemand sessions can run for at most #{max_hours} hours; you asked for " \
+                         "#{hours}. For longer work, submit a batch job with sbatch from a login node."
+  end
 -%>
 script:
   job_name: "ood-rstudio"

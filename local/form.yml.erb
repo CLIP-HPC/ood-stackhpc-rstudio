@@ -152,17 +152,24 @@ attributes:
       - ["256 GB", "256", data-only-partition: "m"]
       - ["512 GB", "512", data-only-partition: "m"]
       - ["1000 GB", "1000", data-only-partition: "m"]
+<%-
+  # The wall time limit comes from the interactive QOS in Slurm (../qos_limits.rb), so
+  # the choices follow QOS changes; submit.yml.erb checks it again with a clear message
+  load File.join(File.dirname(__FILE__), "..", "qos_limits.rb")
+  max_hours = RStudioQos.limits[:hours]
+-%>
   bc_num_hours:
     widget: "select"
     label: "Wall time (hours)"
-    help: "Maximum session duration, in hours (the interactive QOS allows at most 12)."
+    help: |
+      OnDemand sessions can run for at most <%= max_hours %> hours, on every partition.
+      For longer work, submit a batch job with `sbatch` from a login node: batch jobs
+      can run for up to 14 days.
     value: "1"
     options:
-      - ["1", "1"]
-      - ["2", "2"]
-      - ["4", "4"]
-      - ["8", "8"]
-      - ["12", "12"]
+<%- RStudioQos.hour_options(max_hours).each do |h| -%>
+      - ["<%= h %>", "<%= h %>"]
+<%- end -%>
   bc_email_on_started: ""
 form:
   - rstudio_module
