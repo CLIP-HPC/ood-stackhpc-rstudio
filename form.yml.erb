@@ -1,46 +1,181 @@
 ---
+# This is the generic/shipped form template (cluster left blank on purpose).
+# OnDemand renders local/form.yml.erb instead of this file whenever it
+# exists, since local/ overrides take precedence - local/form.yml.erb is
+# this site's actual config (pinned to the "cbe" cluster). Keep both in
+# sync for changes that aren't cluster-specific.
 cluster: ""
+<%-
+  require "json"
+
+  # Module availability is read from this site's periodically-refreshed
+  # module snapshot rather than shelling out to `module avail` live: this
+  # app's own process runs in a mount namespace where CVMFS's nested
+  # software catalogs aren't visible (confirmed via /proc/<pid>/root - only
+  # the top-level /cvmfs mount is there), so `module` never gets defined no
+  # matter how the shell-out is invoked. This cache is a plain local file,
+  # so it sidesteps that namespace issue entirely, at the cost of only
+  # being as fresh as the cache's last refresh.
+  modules_cache_path = "/etc/ood/modules/cbe.json"
+
+  # load_modules_cache never raises: a failure here (missing/unreadable
+  # file, malformed JSON, etc.) must not break the rest of this form - it
+  # degrades to the hardcoded fallback below and reports what went wrong
+  # via the *_debug variables surfaced in the help text below, since this
+  # can't be observed/tested from a dev shell that may differ from
+  # wherever OnDemand actually renders this file
+  load_modules_cache = ->() {
+    begin
+      [JSON.parse(File.read(modules_cache_path)), nil]
+    rescue => e
+      [{}, "#{e.class}: #{e.message}"]
+    end
+  }
+
+  # collect every "fullName" (e.g. "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2")
+  # filed under top-level module base-name key(s) matching name_or_prefix
+  full_names_under = ->(cache, name_or_prefix, prefix:) {
+    keys = prefix ? cache.keys.select { |k| k.start_with?(name_or_prefix) } : [name_or_prefix]
+    keys.flat_map { |k| (cache[k] || {}).values.map { |meta| meta["fullName"] } }.compact.uniq.sort
+  }
+
+  # escape a string for safe embedding inside a double-quoted YAML scalar
+  # (block form avoids gsub's own backslash-replacement reinterpretation)
+  yaml_escape = ->(s) {
+    s.to_s
+      .gsub("\\") { "\\\\" }
+      .gsub('"') { "\\\"" }
+      .gsub("\r") { "" }
+      .gsub("\n") { "\\n" }
+  }
+
+  modules_cache, cache_err = load_modules_cache.call
+
+  rstudio_server_modules = cache_err ? [] : full_names_under.call(modules_cache, "RStudio-Server", prefix: false)
+  rstudio_debug = cache_err || (rstudio_server_modules.empty? ? "no RStudio-Server entries in #{modules_cache_path}" : nil)
+  rstudio_debug = yaml_escape.call(rstudio_debug)[0, 300] if rstudio_debug
+  rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
+
+  r_bundle_modules = cache_err ? [] : full_names_under.call(modules_cache, "R-bundle-", prefix: true)
+  bundle_debug = cache_err || (r_bundle_modules.empty? ? "no R-bundle-* entries in #{modules_cache_path}" : nil)
+  bundle_debug = yaml_escape.call(bundle_debug)[0, 300] if bundle_debug
+
+  # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into a module name
+  toolchain_of = ->(name) { name[/-(?:foss|gfbf)-(\d{4}[ab])/, 1] }
+  rversion_of  = ->(name) { name[/-R-([\d.]+)\z/, 1] }
+
+  compatible = ->(rstudio_name, bundle_name) {
+    tag = toolchain_of.call(rstudio_name)
+    next false if tag.nil? || !bundle_name.include?("-#{tag}")
+    bundle_rver = rversion_of.call(bundle_name)
+    bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
+  }
+-%>
 # Limits follow the interactive QOS (48 CPUs, 1000 GB, 12 hours per user) and the
-# submit rules on CBE.next: sessions on m need at least 128 GB, sessions on g get one GPU.
+# submit rules on CBE.next: sessions on m need at least 200 GB (204800 MB, enforced by
+# the cluster's submit filter), sessions on g get one GPU.
 attributes:
-  rstudio_module:
-    value: "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"
-  auto_queues:
+  partition:
     widget: "select"
     label: "Partition"
-    help: |
-      Slurm partition to submit the job to. Sessions on GPU (g) get one GPU.
-      Sessions on high memory (m) need at least 128 GB memory.
+    help: "Slurm partition to submit the job to. Sessions on GPU (g) get one GPU of the type chosen below. Sessions on high memory (m) need at least 200 GB memory."
     options:
-      - ["CPU (c)", "c", data-min-ram: 1, data-set-ram: 32]
-      - ["GPU (g)", "g", data-min-ram: 1, data-set-ram: 32]
-      - ["High memory (m)", "m", data-min-ram: 128, data-set-ram: 128]
+      - ["CPU (c)", "c"]
+      - ["GPU (g)", "g"]
+      - ["High memory (m)", "m"]
+  gpu_type:
+    widget: "select"
+    label: "GPU type"
+    help: "GPU to request on the GPU (g) partition (one per session). MIG slices are a fraction of a GPU and use far less of your fair-share than a full GPU. Only shown when the GPU (g) partition is selected."
+    options:
+      # values are Slurm GRES type names (sinfo -p g -o %G); "" requests any GPU
+      - ["NVIDIA B200 MIG slice (1g, 23 GB)", "nvidia_b200_1g.23gb"]
+      - ["NVIDIA B200 (full, 180 GB)", "nvidia_b200"]
+      - ["NVIDIA A100 MIG slice (3g, 20 GB)", "nvidia_a100_3g.20gb"]
+      - ["NVIDIA A100 (full, 40 GB)", "nvidia_a100-sxm4-40gb"]
+      - ["NVIDIA Quadro RTX 6000 (24 GB)", "quadro_rtx_6000"]
+      - ["Any available GPU", ""]
+  rstudio_module:
+    widget: "select"
+    label: "RStudio Server module"
+    help: "RStudio Server build to launch. Each build is matched to a specific R version, which also filters which \"Additional R bundle\" options below are compatible.<%= rstudio_debug ? " [module discovery: #{rstudio_debug}]" : '' %>"
+    options:
+<%- # values are the module names themselves (not list indices), so a
+    # submitted/cached choice stays valid when the module cache is refreshed
+    # and its ordering shifts; script.sh.erb checks it against the cache -%>
+<%- rstudio_server_modules.each do |rm| -%>
+      - ["<%= yaml_escape.call(rm) %>", "<%= yaml_escape.call(rm) %>"]
+<%- end -%>
+  r_bundle_module:
+    widget: "select"
+    label: "Additional R bundle"
+    help: "Optional R-bundle-* module (e.g. CRAN/Bioconductor) to load alongside the selected RStudio Server module. Options are filtered by form.js to match its R/toolchain version. Choose None to skip.<%= bundle_debug ? " [module discovery: #{bundle_debug}]" : '' %>"
+    options:
+      - ["None", ""]
+<%- # data-compat-rstudio lists the compatible rstudio_module values (module
+    # names, comma-separated - names never contain commas) for form.js to
+    # filter on (OnDemand's own data-option-for-* directives were tried here
+    # first but did not reliably apply, so this is a self-contained replacement) -%>
+<%- r_bundle_modules.each do |bm| -%>
+<%- compat_names = rstudio_server_modules.select { |rm| compatible.call(rm, bm) } -%>
+      - - "<%= yaml_escape.call(bm) %>"
+        - "<%= yaml_escape.call(bm) %>"
+        - data-compat-rstudio: "<%= yaml_escape.call(compat_names.join(',')) %>"
+<%- end -%>
   extra_modules_script: ""
   cores:
-    widget: "number_field"
+    widget: "select"
     label: "CPU cores"
-    value: 2
-    min: 1
-    max: 48
-    step: 1
+    help: "Number of CPU cores to request (--cpus-per-task)."
+    options:
+      - ["1", "1"]
+      - ["2", "2"]
+      - ["4", "4"]
+      - ["8", "8"]
+      - ["16", "16"]
+      - ["32", "32"]
   ram:
-    widget: "number_field"
+    widget: "select"
     label: "Memory (GB)"
-    value: 32
-    min: 1
-    max: 1000
-    step: 1
+    help: "Amount of memory to request, in GB. The high memory (m) partition offers 200 GB to 1000 GB; the other partitions up to 128 GB."
+    options:
+<%- # data-only-partition lists the partitions an option is offered on (form.js
+    # hides it elsewhere): m sessions need at least 200 GB, and the
+    # interactive QOS caps memory at 1000 GB -%>
+      - ["4 GB", "4", data-only-partition: "c,g"]
+      - ["8 GB", "8", data-only-partition: "c,g"]
+      - ["16 GB", "16", data-only-partition: "c,g"]
+      - ["32 GB", "32", data-only-partition: "c,g"]
+      - ["64 GB", "64", data-only-partition: "c,g"]
+      - ["128 GB", "128", data-only-partition: "c,g"]
+      - ["200 GB", "200", data-only-partition: "m"]
+      - ["256 GB", "256", data-only-partition: "m"]
+      - ["512 GB", "512", data-only-partition: "m"]
+      - ["1000 GB", "1000", data-only-partition: "m"]
+<%-
+  # The wall time limit comes from the interactive QOS in Slurm (qos_limits.rb), so the
+  # choices follow QOS changes; submit.yml.erb checks it again with a clear message
+  load File.join(File.dirname(__FILE__), "qos_limits.rb")
+  max_hours = RStudioQos.limits[:hours]
+-%>
   bc_num_hours:
-    widget: "number_field"
-    label: "Hours"
-    value: 8
-    min: 1
-    max: 12
-    step: 1
+    widget: "select"
+    label: "Wall time (hours)"
+    help: |
+      OnDemand sessions can run for at most <%= max_hours %> hours, on every partition.
+      For longer work, submit a batch job with `sbatch` from a login node: batch jobs
+      can run for up to 14 days.
+    value: "1"
+    options:
+<%- RStudioQos.hour_options(max_hours).each do |h| -%>
+      - ["<%= h %>", "<%= h %>"]
+<%- end -%>
   bc_email_on_started: ""
 form:
   - rstudio_module
-  - auto_queues
+  - r_bundle_module
+  - partition
+  - gpu_type
   - extra_modules_script
   - cores
   - ram

@@ -1,8 +1,88 @@
 #!/bin/bash
 <%-
   session_dir = session.staged_root
+
+  # rstudio_module and r_bundle_module hold module names as submitted by
+  # the form; they are only used if still present in the module cache (and,
+  # for the bundle, compatible with the RStudio build - form.js only filters
+  # client-side), so a stale or tampered value can't reach `module load`
+  require "json"
+
+  # Module availability is read from this site's periodically-refreshed
+  # module snapshot rather than shelling out to `module avail` live: this
+  # app's own process runs in a mount namespace where CVMFS's nested
+  # software catalogs aren't visible (confirmed via /proc/<pid>/root - only
+  # the top-level /cvmfs mount is there), so `module` never gets defined no
+  # matter how the shell-out is invoked. This cache is a plain local file,
+  # so it sidesteps that namespace issue entirely.
+  modules_cache_path = "/etc/ood/modules/cbe.json"
+
+  load_modules_cache = ->() {
+    begin
+      [JSON.parse(File.read(modules_cache_path)), nil]
+    rescue => e
+      [{}, "#{e.class}: #{e.message}"]
+    end
+  }
+
+  # collect every "fullName" (e.g. "RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2")
+  # filed under top-level module base-name key(s) matching name_or_prefix
+  full_names_under = ->(cache, name_or_prefix, prefix:) {
+    keys = prefix ? cache.keys.select { |k| k.start_with?(name_or_prefix) } : [name_or_prefix]
+    keys.flat_map { |k| (cache[k] || {}).values.map { |meta| meta["fullName"] } }.compact.uniq.sort
+  }
+
+  # quote a string as a single safe bash argument, so discovery error text
+  # can't be interpreted as shell syntax when echoed into this generated script
+  sh_quote = ->(s) { "'" + s.to_s.gsub("'") { "'\\''" } + "'" }
+
+  modules_cache, cache_err = load_modules_cache.call
+
+  rstudio_server_modules = cache_err ? [] : full_names_under.call(modules_cache, "RStudio-Server", prefix: false)
+  rstudio_server_modules = ["RStudio-Server/2024.12.0+467-foss-2024a-R-4.4.2"] if rstudio_server_modules.empty?
+  rstudio_invalid = !context.rstudio_module.blank? && !rstudio_server_modules.include?(context.rstudio_module)
+  selected_rstudio_module = rstudio_server_modules.include?(context.rstudio_module) ? context.rstudio_module : rstudio_server_modules.first
+
+  # toolchain generation (e.g. "2024a") and R version (e.g. "4.4.2") baked into
+  # a module name - must match form.yml.erb's compatibility rule
+  toolchain_of = ->(name) { name[/-(?:foss|gfbf)-(\d{4}[ab])/, 1] }
+  rversion_of  = ->(name) { name[/-R-([\d.]+)\z/, 1] }
+
+  compatible = ->(rstudio_name, bundle_name) {
+    tag = toolchain_of.call(rstudio_name)
+    next false if tag.nil? || !bundle_name.include?("-#{tag}")
+    bundle_rver = rversion_of.call(bundle_name)
+    bundle_rver.nil? || bundle_rver == rversion_of.call(rstudio_name)
+  }
+
+  r_bundle_modules = cache_err ? [] : full_names_under.call(modules_cache, "R-bundle-", prefix: true)
+  requested_r_bundle_module = context.r_bundle_module.blank? ? nil : context.r_bundle_module
+  bundle_unknown = requested_r_bundle_module && !r_bundle_modules.include?(requested_r_bundle_module)
+  bundle_incompatible = requested_r_bundle_module && !bundle_unknown && !compatible.call(selected_rstudio_module, requested_r_bundle_module)
+  selected_r_bundle_module = (requested_r_bundle_module && !bundle_unknown && !bundle_incompatible) ? requested_r_bundle_module : nil
+
+  # RStudio builds to try on the node, in order: the selected one, then any
+  # other cached build embedding the same R version. The cache only reflects
+  # one CPU architecture, so a cached build may not exist for the node's
+  # architecture; availability is checked on the node itself below
+  selected_rversion = rversion_of.call(selected_rstudio_module)
+  rstudio_candidates = [selected_rstudio_module] + rstudio_server_modules.select { |m|
+    m != selected_rstudio_module && selected_rversion && rversion_of.call(m) == selected_rversion
+  }
 %>
 # A wrapper to start rserver with recommended configuration settings.
+<% if cache_err -%>
+echo <%= sh_quote.call("WARNING: module cache read failed (#{cache_err}); falling back to #{selected_rstudio_module}, no bundle will be loaded") %> >&2
+<% end -%>
+<% if rstudio_invalid -%>
+echo <%= sh_quote.call("WARNING: selected RStudio Server module #{context.rstudio_module} is not available; falling back to #{selected_rstudio_module}") %> >&2
+<% end -%>
+<% if bundle_unknown && !cache_err -%>
+echo <%= sh_quote.call("WARNING: selected R bundle #{requested_r_bundle_module} is not available; no bundle will be loaded") %> >&2
+<% end -%>
+<% if bundle_incompatible -%>
+echo <%= sh_quote.call("WARNING: selected R bundle #{requested_r_bundle_module} is not compatible with #{selected_rstudio_module}; no bundle will be loaded") %> >&2
+<% end -%>
 
 #############
 # constants #
@@ -16,8 +96,6 @@ export RSERVER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rserver.conf
 export RSESSION_CONFIG_FILE=$RSTUDIO_DATA_DIR/rsession.conf
 export RDATABASE_CONFIG_FILE=$RSTUDIO_DATA_DIR/db.conf
 export RSTUDIO_LOGS_DIR=$RSTUDIO_DATA_DIR/logs
-# NB The form.yml.erb must supply either the auto_modules_RStudio_Server attribute or the rstudio_module attribue
-export RSTUDIO_MODULE=<%= context["auto_modules_RStudio-Server"] || context.rstudio_module %>
 export RSERVER_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rserver.conf
 export RSESSION_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/rsession.conf
 export RDATABASE_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/db.conf
@@ -27,8 +105,53 @@ export RDATABASE_USER_CONFIG_FILE=$RSTUDIO_DATA_DIR/db.conf
 ###################
 echo "Preparing rstudio configuration..."
 
+echo "[$(date +%T)] loading modules on $(hostname -s)..."
 module purge
-module load $RSTUDIO_MODULE
+
+# CPU architecture of this node's module tree (set by the EESSI init that the
+# cluster's script_wrapper sources), for error messages
+NODE_ARCH="${EESSI_SOFTWARE_SUBDIR:-unknown architecture}"
+
+# rserver is RPATH-linked against the R build it depends on, so the R version
+# is selected by picking an RStudio-Server module (see form.yml.erb), not by
+# loading a separate R module afterwards - that only changes which R is on
+# PATH, not the R engine rsession embeds, and crashes with "undefined symbol"
+# errors on ABI mismatch. Fallbacks are therefore limited to builds with the
+# same R version.
+RSTUDIO_MODULE=""
+R_BUNDLE_COMPATIBLE=false
+<% rstudio_candidates.each do |candidate| -%>
+if [[ -z "$RSTUDIO_MODULE" ]] && module is-avail <%= sh_quote.call(candidate) %>; then
+  RSTUDIO_MODULE=<%= sh_quote.call(candidate) %>
+  R_BUNDLE_COMPATIBLE=<%= (selected_r_bundle_module && compatible.call(candidate, selected_r_bundle_module)) ? "true" : "false" %>
+fi
+<% end -%>
+
+if [[ -z "$RSTUDIO_MODULE" ]]; then
+  echo "ERROR: RStudio Server module <%= selected_rstudio_module %> (or another build with the same R version) is not available on $(hostname -s) ($NODE_ARCH). Choose another RStudio Server module or partition." >&2
+  exit 1
+fi
+if [[ "$RSTUDIO_MODULE" != <%= sh_quote.call(selected_rstudio_module) %> ]]; then
+  echo "WARNING: <%= selected_rstudio_module %> is not available on $(hostname -s) ($NODE_ARCH); using $RSTUDIO_MODULE instead" >&2
+fi
+export RSTUDIO_MODULE
+
+echo "[$(date +%T)] loading $RSTUDIO_MODULE..."
+module load "$RSTUDIO_MODULE"
+if ! command -v rserver >/dev/null 2>&1; then
+  echo "ERROR: loading $RSTUDIO_MODULE on $(hostname -s) ($NODE_ARCH) did not provide rserver" >&2
+  exit 1
+fi
+
+<% if selected_r_bundle_module -%>
+if [[ "$R_BUNDLE_COMPATIBLE" != true ]]; then
+  echo "WARNING: R bundle <%= selected_r_bundle_module %> is not compatible with $RSTUDIO_MODULE; continuing without it" >&2
+elif module is-avail <%= sh_quote.call(selected_r_bundle_module) %>; then
+  module load <%= sh_quote.call(selected_r_bundle_module) %>
+else
+  echo "WARNING: R bundle <%= selected_r_bundle_module %> is not available on $(hostname -s) ($NODE_ARCH); continuing without it" >&2
+fi
+<% end -%>
 
 ################################################################
 # load the module helper script (if the user has supplied one) #
@@ -142,6 +265,7 @@ echo "r-libs-user=$R_LIBS_PATHS" >> $RSESSION_USER_CONFIG_FILE
 #################
 # start rserver #
 #################
+echo "[$(date +%T)] starting rserver on port $port..."
 
 # pass execution to rserver
 rserver --config-file=$RSERVER_USER_CONFIG_FILE \
