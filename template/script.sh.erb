@@ -267,6 +267,17 @@ echo "r-libs-user=$R_LIBS_PATHS" >> $RSESSION_USER_CONFIG_FILE
 # Legacy CBE enabled this in the JupyterHub RStudio image as well.
 echo "copilot-enabled=1" >> $RSESSION_USER_CONFIG_FILE
 
+# The EasyBuild RStudio-Server builds are not RSTUDIO_PACKAGE_BUILDs, so on Linux
+# rsession looks for node.js in the source tree (../../dependencies/common/node/...)
+# instead of the bundled bin/node. Without node the Copilot agent never starts
+# ("agent is not currently running"). Point rsession at the bundled node.
+RSTUDIO_NODE_DIR="$(dirname "$(readlink -f "$(command -v rserver)")")/node"
+if [[ -x "$RSTUDIO_NODE_DIR/bin/node" ]]; then
+  echo "external-node-path=$RSTUDIO_NODE_DIR" >> $RSESSION_USER_CONFIG_FILE
+else
+  echo "WARNING: no bundled node.js at $RSTUDIO_NODE_DIR; GitHub Copilot will not start" >&2
+fi
+
 #################
 # start rserver #
 #################
