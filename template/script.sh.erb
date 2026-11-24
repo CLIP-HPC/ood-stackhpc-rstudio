@@ -262,6 +262,11 @@ fi
 # copy R_LIBS_PATHS into the session config file
 echo "r-libs-user=$R_LIBS_PATHS" >> $RSESSION_USER_CONFIG_FILE
 
+# enable GitHub Copilot (off by default in RStudio Server, needs 2023.09+);
+# users sign in with their own GitHub account under Tools > Global Options > Copilot.
+# Legacy CBE enabled this in the JupyterHub RStudio image as well.
+echo "copilot-enabled=1" >> $RSESSION_USER_CONFIG_FILE
+
 #################
 # start rserver #
 #################
